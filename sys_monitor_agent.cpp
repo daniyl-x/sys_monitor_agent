@@ -38,7 +38,7 @@ void daemonize() {
     pid_t pid = fork();
 
     if (pid < 0) {
-        std::cerr << "Error: Fork failed." << std::endl;
+        std::cerr << "Error: Fork1 failed." << std::endl;
         exit(EXIT_FAILURE);
     }
     if (pid > 0) {
@@ -53,7 +53,7 @@ void daemonize() {
     pid = fork();
 
     if (pid < 0) {
-        std::cerr << "Error: Fork failed." << std::endl;
+        std::cerr << "Error: Fork2 failed." << std::endl;
         exit(EXIT_FAILURE);
     }
     if (pid > 0) {
@@ -91,7 +91,7 @@ uint64_t time_current_milliseconds() {
 
 
 std::string exec_command(const char * cmd) {
-    std::array<char, 1024 * 10> buffer;
+    std::array<char, 1024 * 10> buffer{};
     std::string result;
 
     std::unique_ptr<FILE, int(*)(FILE*)> pipe(popen(cmd, "r"), static_cast<int(*)(FILE*)>(pclose));
@@ -116,9 +116,6 @@ std::string trim(const std::string &str) {
     return str.substr(start, end - start + 1);
 }
 
-std::string do_replace( std::string const & in, std::string const & from, std::string const & to) {
-    return std::regex_replace( in, std::regex(from), to );
-}
 
 std::string join(const std::vector<std::string> & parts, const std::string & delemiter) {
     return std::accumulate(std::next(parts.begin()), parts.end(), parts[0],
@@ -140,15 +137,17 @@ std::vector<std::string> split_trim(const std::string & line, const std::string 
     return result;
 }
 
-std::string as_json_string(std::vector<std::pair<std::string, std::string>> fields) {
+std::string as_json_string(std::vector<std::pair<std::string, std::string>> & fields) {
     std::vector<std::string> data;
     for (const auto& item : fields) {
         auto name = item.first;
         auto value = item.second;
         boost::replace_all(value, "\"", "\\\"");
-        auto n = "\"" + name + "\"";
-        auto v = "\"" + value + "\"";
-        data.push_back(n + ":" + v);
+
+        auto result_str = "\"" + name + "\"";
+        result_str += ":";
+        result_str += "\"" + value + "\"";
+        data.push_back(result_str);
     }
     auto result =  join(data, ",");
     return "{" + result + "}";
@@ -353,7 +352,7 @@ std::string get_loadavg() {
     return "[" + std::to_string(ld[0]) + "," + std::to_string(ld[1]) + "," + std::to_string(ld[2]) + "]";
 }
 
-std::string cpu_usage_report(std::string hostname) {
+std::string cpu_usage_report(std::string & hostname) {
     auto cpu_data = cpu_usage();
     auto loadavg = get_loadavg();
     auto uptime = getUptime();
@@ -370,7 +369,7 @@ std::string cpu_usage_report(std::string hostname) {
 }
 
 
-std::string disk_space(std::string hostname) {
+std::string disk_space(std::string & hostname) {
     struct statvfs buf;
     std::string path = "/";
     if (statvfs(path.c_str(), &buf) == 0) {
@@ -403,7 +402,7 @@ std::string inject_common_data(const std::string & action, const std::string & d
 }
 
 std::vector<std::pair<std::string, std::string>>
-parse_command_line_ps(const std::string & input, int marker, const std::vector<std::string> names) {
+parse_command_line_ps(const std::string & input, int marker, const std::vector<std::string> & names) {
     std::istringstream iss(input);
     std::string part;
     std::vector<std::string> parts;
