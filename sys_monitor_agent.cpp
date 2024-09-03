@@ -6,11 +6,7 @@
 #include <iostream>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <ctime>
-
-#include <stdio.h>
-#include <regex>
 
 #include <fstream>
 #include <sstream>
@@ -21,9 +17,7 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/asio.hpp>
 #include <boost/unordered_map.hpp>
-#include <chrono>
 #include <thread>
-
 
 // Initial system / stat agent for linux
 
@@ -91,15 +85,15 @@ uint64_t time_current_milliseconds() {
 
 
 std::string exec_command(const char * cmd) {
-    std::array<char, 1024 * 10> buffer{};
+    std::array<char, 1024 * 20> buffer{};
     std::string result;
 
     std::unique_ptr<FILE, int(*)(FILE*)> pipe(popen(cmd, "r"), static_cast<int(*)(FILE*)>(pclose));
     if (!pipe) {
-        throw std::runtime_error("Cannot run command. popen() failed!");
+        throw std::runtime_error("Cannot run command [" + std::string(cmd) + "]");
     }
 
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    while (fgets(buffer.data(), buffer.size() - 1, pipe.get()) != nullptr) {
         result += std::string(buffer.data());
     }
     return result;
@@ -153,7 +147,6 @@ std::string as_json_string(std::vector<std::pair<std::string, std::string>> & fi
     return "{" + result + "}";
 }
 
-
 std::string actual_hostname;
 std::string get_hostname() {
     if (!actual_hostname.empty()) {
@@ -165,6 +158,17 @@ std::string get_hostname() {
     }
     return actual_hostname;
 }
+
+
+std::string inject_common_data(const std::string & action, const std::string & data) {
+    return "{"
+           "\"action\":   \"monitor-" + action + "\""
+            ",\"host\":"  "\"" + get_hostname() + "\""
+            ",\"time\":"  "\"" + std::to_string(time(0)) + "\""
+            ",\"data\":" + data +
+           "}";
+}
+
 
 struct NetworkStats {
     std::string name;
@@ -225,13 +229,7 @@ std::string network_usage() {
 
 std::string network_usage_report(std::string hostname) {
     auto net = network_usage();
-    return "{"
-           "\"action\":"  "\"monitor-network\""
-           ",\"data\":{"
-           "\"host\":"  "\"" + hostname + "\""
-          ",\"time\":" "\"" + std::to_string(time(0)) + "\""
-           ",\"net\":"   + net + ""
-           + "}}";
+    return inject_common_data("net", net);
 }
 
 
@@ -255,14 +253,7 @@ std::string getMeminfo() {
 
 std::string memory_report(std::string hostname) {
     auto memory = getMeminfo();
-
-    return "{"
-           "\"action\":"  "\"monitor-memory\""
-           ",\"data\":{"
-           "\"host\":"  "\"" + hostname + "\""
-          ",\"time\":" "\""  + std::to_string(time(0)) + "\""
-            ",\"memory\":"   + memory + ""
-           + "}}";
+    return inject_common_data("memory", memory);
 }
 
 std::string getUptime() {
@@ -278,14 +269,14 @@ std::string getUptime() {
 
 
 struct CPUStats {
-    unsigned long long user;
-    unsigned long long nice;
-    unsigned long long system;
-    unsigned long long idle;
-    unsigned long long iowait;
-    unsigned long long irq;
-    unsigned long long softirq;
-    unsigned long long steal;
+    uint64_t user;
+    uint64_t nice;
+    uint64_t system;
+    uint64_t idle;
+    uint64_t iowait;
+    uint64_t irq;
+    uint64_t softirq;
+    uint64_t steal;
 };
 
 
@@ -306,16 +297,16 @@ std::vector<CPUStats> readCPUStats(int nproc) {
 }
 
 float calculateCPUUsage(const CPUStats& start, const CPUStats& end) {
-    unsigned long long prevIdle = start.idle + start.iowait;
-    unsigned long long idle = end.idle + end.iowait;
-    unsigned long long prevNonIdle = start.user + start.nice + start.system + start.irq + start.softirq + start.steal;
-    unsigned long long nonIdle = end.user + end.nice + end.system + end.irq + end.softirq + end.steal;
+    auto prevIdle = start.idle + start.iowait;
+    auto idle = end.idle + end.iowait;
+    auto prevNonIdle = start.user + start.nice + start.system + start.irq + start.softirq + start.steal;
+    auto nonIdle = end.user + end.nice + end.system + end.irq + end.softirq + end.steal;
 
-    unsigned long long prevTotal = prevIdle + prevNonIdle;
-    unsigned long long total = idle + nonIdle;
+    auto prevTotal = prevIdle + prevNonIdle;
+    auto total = idle + nonIdle;
 
-    unsigned long long totald = total - prevTotal;
-    unsigned long long idled = idle - prevIdle;
+    auto totald = total - prevTotal;
+    auto idled = idle - prevIdle;
 
     float cpu_percentage = ((totald - idled) / (float)totald) * 100;
     return cpu_percentage;
@@ -357,49 +348,40 @@ std::string cpu_usage_report(std::string & hostname) {
     auto loadavg = get_loadavg();
     auto uptime = getUptime();
 
-    return "{"
-           "\"action\":"  "\"monitor-cpu\""
-           ",\"data\":{"
-           "\"host\":"  "\"" + hostname + "\""
-           ",\"time\":" "\"" + std::to_string(time(0)) + "\""
-           ",\"cpu\":"       + cpu_data + ""
-           ",\"uptime\":"    + uptime + ""
-           ",\"loadavg\":"   + loadavg
-           + "}}";
+    auto data = "{"
+                        "\"cpu\":" + cpu_data + ""
+                        ",\"uptime\":"    + uptime + ""
+                        ",\"loadavg\":"   + loadavg
+                     + "}";
+
+    return inject_common_data("cpu", data);
 }
 
 
-std::string disk_space(std::string & hostname) {
-    struct statvfs buf;
-    std::string path = "/";
-    if (statvfs(path.c_str(), &buf) == 0) {
-        unsigned long total = buf.f_blocks * buf.f_frsize;
-        unsigned long free = buf.f_bfree * buf.f_frsize;
-        unsigned long used = total - free;
-        unsigned long usage = used * 100 / total;
+std::string disk_space(std::string & mount_point_str) {
+    std::vector<std::string> result;
 
-        return "{"
-               "\"action\":"  "\"monitor-disk\""
-               ",\"data\":{"
-               "\"host\":"  "\"" + hostname + "\""
-               ",\"time\":"  "\"" + std::to_string(time(0)) + "\""
-               ",\"disk\":{"
-                 "\"total\":"  + std::to_string(total)
-               + ",\"free\":"  + std::to_string(free)
-               + ",\"usage\":" + std::to_string(usage)
-               + "}}}";
-    } else {
-        return "{}";
+    std::vector<std::string> mount_points = split_trim(mount_point_str.empty() ? "/" : mount_point_str, ";");
+
+    for (auto path : mount_points) {
+        struct statvfs buf;
+        if (statvfs(path.c_str(), &buf) == 0) {
+            auto total = buf.f_blocks * buf.f_frsize;
+            auto free = buf.f_bfree * buf.f_frsize;
+            auto used = total - free;
+            auto usage = used * 100 / total;
+
+            result.push_back("{"
+                               "\"mounted\":" "\"" + path + "\""
+                             + ",\"total\":" + std::to_string(total)
+                             + ",\"free\":" + std::to_string(free)
+                             + ",\"usage\":" + std::to_string(usage)
+                             + "}");
+        }
     }
+    return inject_common_data("disk", "[" + join(result, ",") + "]");
 }
 
-std::string inject_common_data(const std::string & action, const std::string & data) {
-    return "{"
-           "\"action\":   \"monitor-" + action + "\""
-           ",\"host\":"  "\"" + get_hostname() + "\""
-           ",\"data\":" + data +
-       "}";
-}
 
 std::vector<std::pair<std::string, std::string>>
 parse_command_line_ps(const std::string & input, int marker, const std::vector<std::string> & names) {
@@ -466,12 +448,12 @@ command_line_blanks_posit_parse(const std::string & input, std::vector<std::pair
 }
 
 class PerformSender {
-const int DEFAULT_TIMEOUT_SEC = 30;
 private:
     boost::asio::ip::udp::endpoint endpoint_;
     boost::asio::ip::udp::socket socket_;
     boost::asio::system_timer timer_;
     unsigned timeout_;
+    bool print_sent_message_;
     std::string params_;
 
     std::string message_;
@@ -483,31 +465,37 @@ public:
                            unsigned timeout_sec,
                            const boost::asio::ip::address& multicast_address,
                            short unsigned port,
-                           const std::string params)
+                           const std::string & params,
+                           bool print_sent_message)
             : endpoint_{multicast_address, port}
             , socket_{ioc, endpoint_.protocol()}
             , timer_(ioc)
-            , timeout_{timeout_sec} {
+            , timeout_{timeout_sec}
+            , print_sent_message_{print_sent_message} {
 
         if (params.find("--actions=") != std::string::npos) {
             params_ = params.substr(strlen("--actions="), 1000);
         }
+        std::cout << "Statistics endpoint: " << multicast_address << ":" << port << "\n";
         std::cout << "Requested statistics:\n";
-        for (auto name_str: split_trim(params_, ",")) {
+        for (auto & name_str: split_trim(params_, ",")) {
             auto param_val = split_trim(name_str, ":");
             std::string name;
             if (!param_val.empty()) {
                 name = param_val[0];
-                uint64_t value = param_val.size() > 1 ? atoi(param_val[1].c_str()) : DEFAULT_TIMEOUT_SEC;
+                uint64_t value = param_val.size() > 1 ? atoi(param_val[1].c_str()) : timeout_;
                 timeouts_[name] = value;
                 times_[name] = 0;
-                std::cout << "  " << name << "\t" << value << " sec timeout\n";
+                auto separator = name.size() > strlen("disk") ? "\t" : "\t\t";
+                std::cout << "  " << name << ":" << separator << value << "\t sec timeout";
             }
             if (name_str.find("[") != std::string::npos && name_str.find("]") != std::string::npos) {
                 auto pozit = name_str.find("[");
                 auto extra_params = name_str.substr(pozit + 1, name_str.size() - pozit -2);
                 extra_params_[name] = extra_params;
+                std::cout << "\t[" << extra_params << "]";
             }
+            std::cout << "\n";
         }
 
         send_message_and_next(compose_message("start"));
@@ -518,7 +506,7 @@ public:
         std::vector<std::string> result;
         auto idxs = command_line_blanks_posit(lines.at(0), names);
         for (ulong n = 1; n < lines.size(); n++) {
-            auto line = lines.at(n);
+            auto & line = lines.at(n);
             if (!line.empty()) {
                 auto data = command_line_blanks_posit_parse(line, idxs);
                 result.push_back(as_json_string(data));
@@ -530,7 +518,7 @@ public:
     std::string compose_message(std::string message_type) {
         auto hostname = get_hostname();
         std::string action = message_type;
-        const char * command = NULL;
+        const char * command = nullptr;
 
         times_[message_type] = time_current_seconds();
 
@@ -547,7 +535,7 @@ public:
             return memory_report(hostname);
         }
         if (message_type == "disk") {
-            return disk_space(hostname);
+            return disk_space(extra_params_[message_type]);
         }
         if (message_type == "docker") {
             auto docker_info = exec_command("docker ps --no-trunc -a");
@@ -578,7 +566,7 @@ public:
 
             std::vector<std::string> result;
             for (ulong n = 1; n < lines.size(); n++) {
-                auto line = lines.at(n);
+                auto & line = lines.at(n);
                 if (!line.empty()) {
                     auto data = parse_command_line_ps(line, 6, names);
                     result.push_back(as_json_string(data));
@@ -603,8 +591,8 @@ public:
 
                 std::vector<std::pair<std::string, std::string>> data;
                 auto values = split_trim(lines.at(i), " ");
-                if (mount_points.size() > 0) {
-                    auto mount_point = values[5];
+                if (!mount_points.empty()) {
+                    auto & mount_point = values[5];
                     if (count(mount_points.begin(), mount_points.end(), mount_point) <= 0) {
                         continue;   // skip this disk
                     }
@@ -620,27 +608,28 @@ public:
     }
 
     void send_message(std::string message) {
-        std::cout << message << "\n\n" ;
+        if (print_sent_message_) {
+            std::cout << message << "\n\n";
+        }
         socket_.async_send_to(boost::asio::buffer(message), endpoint_,
                               [this](const boost::system::error_code& ec, size_t bytes_recvd){ handle_and_do_noting(ec, bytes_recvd); });
     }
 
     void send_message_and_next(std::string message) {
-        std::cout << message << "\n\n" ;
+        std::cout << "start sending data....\n";
+        if (print_sent_message_) {
+            std::cout << message << "\n\n";
+        }
         socket_.async_send_to(boost::asio::buffer(message), endpoint_,
                               [this](const boost::system::error_code& ec, size_t bytes_recvd){ handle_send_to(ec, bytes_recvd); });
         std::this_thread::sleep_for(std::chrono::milliseconds(1 * 1000));
     }
 
-    void handle_and_do_noting(const boost::system::error_code& ec, size_t bytes_recvd) {
-        if (!ec) {
-            std::cout << "sent [" << bytes_recvd << "] bytes\n";
-        }
+    static void handle_and_do_noting(const boost::system::error_code& ec, size_t bytes_recvd) {
     }
 
     void handle_send_to(const boost::system::error_code& ec, size_t bytes_recvd) {
         if (!ec) {
-            std::cout << "sent [" << bytes_recvd << "] bytes\n";
             timer_.expires_from_now(std::chrono::seconds{timeout_});
             timer_.async_wait([this](const boost::system::error_code &ec) { handle_timeout(ec); });
         }
@@ -679,32 +668,39 @@ public:
 int main(int argc, char* argv[]) {
     try {
         if (argc < 4) {
-            std::cerr << "usage: dspx <multicast group / UDP IP > <port> <timeout_sec> [--actions=<cpu,disk,df,ps,python,docker>]  [-d] \n";
+            std::cerr << "usage:" << argv[0] << " <multicast group / UDP IP > <port> <default_timeout_sec> [--actions=\"cpu:N,disk:N[<mount1;mount2;..>],df:N[<mount1;..>],ps:N,python:N,docker:N\"]  [-d | -p]\n";
             return EXIT_FAILURE;
         }
         auto address = argv[1];
         auto port = argv[2];
         auto timeout_sec = argv[3];
-        auto need_daemonize = 0;
-        auto params = "cpu:5,disk:120,df:120,ps:30,net:20,memory:30,python:30,docker:120";
+        bool need_daemonize = false;
+        bool self_print = false;
+        auto params = "\"cpu:5,disk:120[/],df:120[/],ps:30,net:20,memory:30,python:30,docker:120\"";
 
         if (argc > 4 && std::string(argv[4]).find("--actions=") == 0) {
             params = argv[4];
         }
 
-        if ((argc > 4 && std::string(argv[4]) == "-d")
-         && (argc > 5 && std::string(argv[5]) == "-d")) {
-            need_daemonize = 1;
+        if (argc > 5) {
+            if (std::string(argv[5]) == "-d") need_daemonize = true;
+            if (std::string(argv[5]) == "-p") self_print = true;
+        }
+        else {
+            std::cout << "unrecognised key '" << std::string(argv[5]) << "'\n";
+            return -1;
         }
 
-        std::cout << "address: [" << address << "]   port: [" << port << "] timeout: [" << timeout_sec << "] sec; " <<  params << "\n";
+        std::cout << "\"" << argv[0] << "\" started. \n";
+        std::cout << "address: [" << address << "]   port: [" << port << "] default timeout: [" << timeout_sec << "] sec; " <<  params << "\n";
+
         if (need_daemonize) {
-            std::cout << "RUN AS DAEMON.\n";
+            std::cout << "RUN AS DAEMON...\n";
             daemonize();
         }
 
         boost::asio::io_context ioc;
-        PerformSender sender(ioc, atoi(timeout_sec), boost::asio::ip::address::from_string(address), (short unsigned)atoi(port), params);
+        PerformSender sender(ioc, atoi(timeout_sec), boost::asio::ip::address::from_string(address), (short unsigned)atoi(port), params, self_print);
         ioc.run();
     }
     catch (std::exception& e) {
@@ -722,11 +718,11 @@ int _main(int argc, char* argv[]) {
         auto port = "20008";
         auto timeout_sec = "1";
 
-        auto params = "--actions=cpu:60,df:30[/],memory";
+        auto params = "--actions=\"cpu:60,disk:30[/;/data],memory\"";
         boost::asio::io_context ioc;
         PerformSender sender(ioc, atoi(timeout_sec),
                           boost::asio::ip::address::from_string(address),
-                      (short unsigned)atoi(port), params);
+                      (short unsigned)atoi(port), params, true);
         ioc.run();
     }
     catch (std::exception& e) {
