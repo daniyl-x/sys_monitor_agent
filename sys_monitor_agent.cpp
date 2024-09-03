@@ -665,10 +665,14 @@ public:
 };
 
 
+void usage_massage(const char * pname) {
+    std::cerr << "usage:" << pname << " <multicast group / UDP IP > <port> <default_timeout_sec> [--actions=\"cpu:N,disk:N[<mount1;mount2;..>],df:N[<mount1;..>],ps:N,python:N,docker:N\"]  [-d | -p]\n";
+}
+
 int main(int argc, char* argv[]) {
     try {
         if (argc < 4) {
-            std::cerr << "usage:" << argv[0] << " <multicast group / UDP IP > <port> <default_timeout_sec> [--actions=\"cpu:N,disk:N[<mount1;mount2;..>],df:N[<mount1;..>],ps:N,python:N,docker:N\"]  [-d | -p]\n";
+            usage_massage(argv[0]);
             return EXIT_FAILURE;
         }
         auto address = argv[1];
@@ -683,19 +687,24 @@ int main(int argc, char* argv[]) {
         }
 
         if (argc > 5) {
-            if (std::string(argv[5]) == "-d") need_daemonize = true;
-            if (std::string(argv[5]) == "-p") self_print = true;
-        }
-        else {
-            std::cout << "unrecognised key '" << std::string(argv[5]) << "'\n";
-            return -1;
+            if (std::string(argv[5]) == "-d") {
+                need_daemonize = true;
+            }
+            else if (std::string(argv[5]) == "-p") {
+                self_print = true;
+            }
+            else {
+                std::cout << "unrecognised key '" << std::string(argv[5]) << "'\n";
+                usage_massage(argv[0]);
+                return EXIT_FAILURE;
+            }
         }
 
         std::cout << "\"" << argv[0] << "\" started. \n";
         std::cout << "address: [" << address << "]   port: [" << port << "] default timeout: [" << timeout_sec << "] sec; " <<  params << "\n";
 
         if (need_daemonize) {
-            std::cout << "RUN AS DAEMON...\n";
+            std::cout << "Run as daemon...\n";
             daemonize();
         }
 
