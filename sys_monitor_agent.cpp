@@ -382,6 +382,24 @@ std::string disk_space(std::string & mount_point_str) {
     return inject_common_data("disk", "[" + join(result, ",") + "]");
 }
 
+std::vector<std::string>
+process_lines_by_blank(const std::vector<std::string> & lines, const std::vector<std::string> & names) {
+    std::vector<std::string> result;
+
+    for (const auto& line : lines) {
+        if (!line.empty()) {
+            auto values = split_trim(line, " ");
+            std::vector<std::pair<std::string, std::string>> data;
+            for (auto i = 0; i < values.size(); i++) {
+                auto value = values[i];
+                data.push_back(std::pair<std::string, std::string>(names[i], value));
+            }
+            result.push_back(as_json_string(data));
+        }
+    }
+    return result;
+}
+
 
 std::vector<std::pair<std::string, std::string>>
 parse_command_line_ps(const std::string & input, int marker, const std::vector<std::string> & names) {
@@ -549,6 +567,18 @@ public:
                 return inject_common_data(action, "[" + join(result, ",") + "]");
             }
         }
+        if (message_type == "tcp") {
+            auto posts_info = exec_command("ss  -tlnp"); // TCP ... UDP - -tulnp
+            if (!posts_info.empty()) {
+                std::vector<std::string> res;
+                boost::replace_all(posts_info, " Address", ":Address");
+                const auto names = split("State,Recv-Q,Send-Q,Local:Address:Port,Peer:Address:Port,Process", ",");
+                const auto lines = split(posts_info, "\n");
+
+                auto result = process_lines_by_blank(lines, names);
+                return inject_common_data(action, "[" + join(result, ",") + "]");
+            }
+        }
         if (message_type == "python") {
             command = "ps -eo pcpu,pmem,pid,ppid,user,etime,command | grep python";
             action = "python";
@@ -655,6 +685,7 @@ public:
             if (need_start("ps", current_time))     send_message(compose_message("ps"));
             if (need_start("df", current_time))     send_message(compose_message("df"));
             if (need_start("net", current_time))    send_message(compose_message("net"));
+            if (need_start("tcp", current_time))    send_message(compose_message("tcp"));
             if (need_start("memory", current_time)) send_message(compose_message("memory"));
             if (need_start("python", current_time)) send_message(compose_message("python"));
             if (need_start("cpu", current_time))    send_message(compose_message("cpu"));
@@ -680,7 +711,7 @@ int main(int argc, char* argv[]) {
         auto timeout_sec = argv[3];
         bool need_daemonize = false;
         bool self_print = false;
-        auto params = "\"cpu:5,disk:120[/],df:120[/],ps:30,net:20,memory:30,python:30,docker:120\"";
+        auto params = "\"cpu:5,disk:120[/],df:120[/],ps:30,net:20,memory:30,tcp:30,python:30,docker:120\"";
 
         if (argc > 4 && std::string(argv[4]).find("--actions=") == 0) {
             params = argv[4];
@@ -727,7 +758,7 @@ int _main(int argc, char* argv[]) {
         auto port = "20008";
         auto timeout_sec = "1";
 
-        auto params = "--actions=\"cpu:60,disk:30[/;/data],memory\"";
+        auto params = "--actions=\"cpu:60,tcp:30,disk:30[/;/data],memory\"";
         boost::asio::io_context ioc;
         PerformSender sender(ioc, atoi(timeout_sec),
                           boost::asio::ip::address::from_string(address),
