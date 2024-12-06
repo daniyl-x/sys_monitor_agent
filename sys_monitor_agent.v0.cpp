@@ -10,7 +10,6 @@
 
 #include <fstream>
 #include <sstream>
-#include <utility>
 #include <vector>
 #include <algorithm>
 #include <numeric>
@@ -19,7 +18,17 @@
 #include <boost/asio.hpp>
 #include <boost/unordered_map.hpp>
 #include <thread>
-#include <unordered_set>
+
+// Initial system / stat agent for linux
+
+
+
+//#define SLACK_USING 1
+
+#ifdef SLACK_USING
+
+auto SLACK_CHANNEL = "please put actual Slack channel here";
+std::string VERSION = "1.4.0 OPEN: tcp Slack";
 
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/core.hpp>
@@ -30,52 +39,6 @@
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace ssl = boost::asio::ssl;
-
-typedef unsigned long int ulong;
-
-std::string VERSION = "1.10.0 (free) tcp host dailyreport hostinfo iftop";
-int DEBOUNCE_TIME_SEC = 10 * 60;
-
-std::string APP_KEY = "TESTKEYFORNOW";
-
-std::string get_app_key() {
-    return APP_KEY;
-}
-
-void signalHandler(int signal) {
-    exit(EXIT_SUCCESS);
-}
-
-void daemonize() {
-    pid_t pid = fork();
-    if (pid < 0)        exit(EXIT_FAILURE);
-    if (pid > 0)        exit(EXIT_SUCCESS);
-    if (setsid() < 0)   exit(EXIT_FAILURE);
-
-    pid = fork();
-    if (pid < 0)        exit(EXIT_FAILURE);
-    if (pid > 0)        exit(EXIT_SUCCESS);
-
-    umask(0);
-
-    if (chdir("/") < 0) {
-        std::cerr << "Error: chdir failed." << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
-
-    open("/dev/null", O_RDONLY);
-    open("/dev/null", O_WRONLY);
-    open("/dev/null", O_WRONLY);
-
-    signal(SIGTERM, signalHandler);
-    signal(SIGINT, signalHandler);
-}
-
-
 class SlackStatusSender {
 private:
     boost::asio::io_context ioc_;
@@ -119,7 +82,62 @@ public:
         stream_.shutdown(ec);
     }
 };
+//#elif
 
+#endif
+
+std::string VERSION = "1.4.0 OPEN: tcp";
+
+typedef unsigned long int ulong;
+
+void signalHandler(int signal) {
+    exit(EXIT_SUCCESS);
+}
+
+void daemonize() {
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        std::cerr << "Error: Fork1 failed." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    if (pid > 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    if (setsid() < 0) {
+        std::cerr << "Error: setsid failed." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    pid = fork();
+
+    if (pid < 0) {
+        std::cerr << "Error: Fork2 failed." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    if (pid > 0) {
+        exit(EXIT_SUCCESS);
+    }
+
+    umask(0);
+
+    if (chdir("/") < 0) {
+        std::cerr << "Error: chdir failed." << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    open("/dev/null", O_RDONLY);
+    open("/dev/null", O_WRONLY);
+    open("/dev/null", O_WRONLY);
+
+    signal(SIGTERM, signalHandler);
+    signal(SIGINT, signalHandler);
+}
 
 uint64_t time_current_seconds() {
     using namespace std::chrono;
@@ -133,6 +151,7 @@ uint64_t time_current_milliseconds() {
 
 
 std::string exec_command(const char * cmd) {
+    std::array<char, 1024 * 20> buffer{};
     std::string result;
 
     std::unique_ptr<FILE, int(*)(FILE*)> pipe(popen(cmd, "r"), static_cast<int(*)(FILE*)>(pclose));
@@ -140,7 +159,7 @@ std::string exec_command(const char * cmd) {
         throw std::runtime_error("Cannot run command [" + std::string(cmd) + "]");
     }
 
-    for (std::array<char, 1024> buffer{}; fgets(buffer.data(), buffer.size() - 1, pipe.get()) != nullptr;) {
+    while (fgets(buffer.data(), buffer.size() - 1, pipe.get()) != nullptr) {
         result += std::string(buffer.data());
     }
     return result;
@@ -168,8 +187,7 @@ std::string join(const std::vector<std::string> & parts, const std::string & del
 
 std::vector<std::string> split(const std::string & line, const std::string & separator) {
     std::vector<std::string> result;
-    boost::split(result, line, boost::is_any_of(separator), boost::token_compress_on);
-
+    boost::split(result, line, boost::is_any_of(separator));
     return result;
 }
 
@@ -211,7 +229,6 @@ std::string get_hostname() {
 std::string inject_common_data(const std::string & action, const std::string & data) {
     return "{"
            "\"action\":   \"monitor-" + action + "\""
-            ",\"appkey\":"  "\"" + get_app_key() + "\""
             ",\"host\":"  "\"" + get_hostname() + "\""
             ",\"time\":"  "\"" + std::to_string(time(0)) + "\""
             ",\"data\":" + data +
@@ -282,7 +299,7 @@ std::string network_usage_report(std::string hostname) {
 }
 
 
-std::string get_memory_info() {
+std::string getMeminfo() {
     std::ifstream file("/proc/meminfo");
     int count_processed_lines = 20;
     std::vector<std::string> result;
@@ -301,11 +318,11 @@ std::string get_memory_info() {
 }
 
 std::string memory_report(std::string hostname) {
-    auto memory = get_memory_info();
+    auto memory = getMeminfo();
     return inject_common_data("memory", memory);
 }
 
-std::string get_uptime() {
+std::string getUptime() {
     std::ifstream file("/proc/uptime");
     std::string line;
     std::getline(file, line);
@@ -329,7 +346,7 @@ struct CPUStats {
 };
 
 
-std::vector<CPUStats> read_CPU_stats(int nproc) {
+std::vector<CPUStats> readCPUStats(int nproc) {
     std::ifstream file("/proc/stat");
     std::vector<CPUStats> result;
 
@@ -345,7 +362,7 @@ std::vector<CPUStats> read_CPU_stats(int nproc) {
     return result;
 }
 
-float calculate_CPU_usage(const CPUStats& start, const CPUStats& end) {
+float calculateCPUUsage(const CPUStats& start, const CPUStats& end) {
     auto prevIdle = start.idle + start.iowait;
     auto idle = end.idle + end.iowait;
     auto prevNonIdle = start.user + start.nice + start.system + start.irq + start.softirq + start.steal;
@@ -357,7 +374,7 @@ float calculate_CPU_usage(const CPUStats& start, const CPUStats& end) {
     auto totald = total - prevTotal;
     auto idled = idle - prevIdle;
 
-    float cpu_percentage = totald > 0 ? ((totald - idled) / (float)totald) * 100 : 0;
+    float cpu_percentage = ((totald - idled) / (float)totald) * 100;
     return cpu_percentage;
 }
 
@@ -373,14 +390,14 @@ std::string cpu_usage() {
     }
     nproc = nproc > 0 ? nproc : 1;
     if (cpu_start_status.empty()) {
-        cpu_start_status = read_CPU_stats(nproc);
+        cpu_start_status = readCPUStats(nproc);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
 
-    std::vector<CPUStats> cpu_stop_status = read_CPU_stats(nproc);
+    std::vector<CPUStats> cpu_stop_status = readCPUStats(nproc);
 
     for (int i=0; i<nproc+1; i++) {
-        result.push_back(std::to_string(calculate_CPU_usage(cpu_start_status[i], cpu_stop_status[i])));
+        result.push_back(std::to_string(calculateCPUUsage(cpu_start_status[i], cpu_stop_status[i])));
     }
 
     return "[" + join(result, ",") + "]";
@@ -395,7 +412,8 @@ std::string get_loadavg() {
 std::string cpu_usage_report(std::string & hostname) {
     auto cpu_data = cpu_usage();
     auto loadavg = get_loadavg();
-    auto uptime = get_uptime();
+    auto uptime = getUptime();
+    boost::replace_all(cpu_data, "nan", "0");   // too fast CPU fix
 
     auto data = "{"
                         "\"cpu\":" + cpu_data + ""
@@ -431,6 +449,24 @@ std::string disk_space(std::string & mount_point_str) {
     return inject_common_data("disk", "[" + join(result, ",") + "]");
 }
 
+std::vector<std::string>
+process_lines_by_blank(const std::vector<std::string> & lines, const std::vector<std::string> & names) {
+    std::vector<std::string> result;
+
+    for (const auto& line : lines) {
+        if (!line.empty()) {
+            auto values = split_trim(line, " ");
+            std::vector<std::pair<std::string, std::string>> data;
+            for (auto i = 0; i < values.size(); i++) {
+                auto value = values[i];
+                data.push_back(std::pair<std::string, std::string>(names[i], value));
+            }
+            result.push_back(as_json_string(data));
+        }
+    }
+    return result;
+}
+
 
 std::vector<std::pair<std::string, std::string>>
 parse_command_line_ps(const std::string & input, int marker, const std::vector<std::string> & names) {
@@ -440,11 +476,12 @@ parse_command_line_ps(const std::string & input, int marker, const std::vector<s
     std::vector<std::string> command_line_parts;
     std::vector<std::pair<std::string, std::string>> param_values;
 
+
     for (int i=0; i<100; i++) {
         if (iss >> part) {
             if (i < marker) {
                 auto value = part;
-                param_values.push_back(std::pair<std::string, std::string>(names[i], part));
+                param_values.push_back(std::pair(names[i], part));
 
             } else {
                 boost::replace_all(part, "\\", "\\\\");
@@ -454,7 +491,7 @@ parse_command_line_ps(const std::string & input, int marker, const std::vector<s
     }
     if (!command_line_parts.empty()) {
         auto cmd = join(command_line_parts, " ");
-        param_values.push_back(std::pair<std::string, std::string>(names[marker], cmd));
+        param_values.push_back(std::pair(names[marker], cmd));
     }
 
     return param_values;
@@ -467,11 +504,10 @@ command_line_blanks_posit(const std::string & input,
 
     for (auto name : names) {
         int idx = input.find(name);
-        result.push_back(std::pair<std::string, int>(name, idx));
+        result.push_back(std::pair(name, idx));
     }
     return result;
 }
-
 std::vector<std::pair<std::string, std::string>>
 command_line_blanks_posit_parse(const std::string & input, std::vector<std::pair<std::string, int>> & names) {
     std::vector<std::pair<std::string, std::string>> result;
@@ -484,7 +520,7 @@ command_line_blanks_posit_parse(const std::string & input, std::vector<std::pair
         int idx = item.second;
         if (start != -1) {
             auto value = trim(input.substr (start, idx - start));
-            result.push_back(std::pair<std::string, std::string>(param_name, value));
+            result.push_back(std::pair(param_name, value));
             param_name = name;
             start = idx;
             continue;
@@ -492,26 +528,9 @@ command_line_blanks_posit_parse(const std::string & input, std::vector<std::pair
         start = idx;
         param_name = name;
     }
-    result.push_back(std::pair<std::string, std::string>(param_name, input.substr (start, input.size())));
+    result.push_back(std::pair(param_name, input.substr (start, input.size())));
     return result;
 }
-
-std::vector<std::string> file_as_lines(std::string & filename) {
-    std::vector<std::string> result;
-
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        return result;
-    }
-    std::string line;
-    while (std::getline(file, line)) {
-        result.push_back(line);
-    }
-
-    file.close();
-    return result;
-}
-
 
 class PerformSender {
 private:
@@ -521,15 +540,14 @@ private:
     unsigned timeout_;
     bool print_sent_message_;
     std::string params_;
-    std::string slack_app_url_;
 
     std::string message_;
     boost::unordered_map<std::string, uint64_t> times_;
     boost::unordered_map<std::string, uint64_t> timeouts_;
     boost::unordered_map<std::string, std::string> extra_params_;
-
+#ifdef SLACK_USING
     SlackStatusSender *  slackPost = nullptr;
-    std::unordered_map<std::string, std::time_t> message_sent_map_;
+#endif
 
 public:
     PerformSender(boost::asio::io_context& ioc,
@@ -537,13 +555,11 @@ public:
                            const boost::asio::ip::address& multicast_address,
                            short unsigned port,
                            const std::string & params,
-                           const std::string & slack_app_url,
                            bool print_sent_message)
             : endpoint_{multicast_address, port}
             , socket_{ioc, endpoint_.protocol()}
             , timer_(ioc)
             , timeout_{timeout_sec}
-            , slack_app_url_{slack_app_url}
             , print_sent_message_{print_sent_message} {
 
         if (params.find("--actions=") != std::string::npos) {
@@ -552,72 +568,27 @@ public:
         std::cout << "Version: " << VERSION << "\n";
         std::cout << "Statistics endpoint: " << multicast_address << ":" << port << "\n";
         std::cout << "Requested statistics:\n";
-
         for (auto & name_str: split_trim(params_, ",")) {
             auto param_val = split_trim(name_str, ":");
             std::string name;
-            auto param_printed = false;
-            if (param_val.size() == 2) {
+            if (!param_val.empty()) {
                 name = param_val[0];
                 uint64_t value = param_val.size() > 1 ? atoi(param_val[1].c_str()) : timeout_;
                 timeouts_[name] = value;
                 times_[name] = 0;
                 auto separator = name.size() > strlen("disk") ? "\t" : "\t\t";
-                std::cout << "  " << name << ":" << separator << value << " seconds";
-                param_printed = true;
+                std::cout << "  " << name << ":" << separator << value << "\t sec timeout";
             }
             if (name_str.find("[") != std::string::npos && name_str.find("]") != std::string::npos) {
                 auto pozit = name_str.find("[");
                 auto extra_params = name_str.substr(pozit + 1, name_str.size() - pozit -2);
-                if (name.empty()) {
-                    name = name_str.substr(0, pozit);
-                }
                 extra_params_[name] = extra_params;
-                if (! param_printed) {
-                    auto separator = name.size() > strlen("disk") ? "\t" : "\t\t";
-                    auto comment = name == "dailyreport" ? "\t\t" : " seconds (default)";
-                    std::cout << "  " << name << ":" << separator << timeout_ << comment;
-                }
                 std::cout << "\t[" << extra_params << "]";
             }
             std::cout << "\n";
         }
 
         send_message_and_next(compose_message("start"));
-    }
-
-    bool need_debounce_message(std::string & message, int interval) {
-        if (message_sent_map_.find(message) != message_sent_map_.end()) {
-            time_t now =  std::time(nullptr);
-            time_t lastSent = message_sent_map_[message];
-            auto real_interval = interval == -1 ? DEBOUNCE_TIME_SEC : interval;
-            if (now - lastSent < real_interval) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void register_message(std:: string & message) {
-        message_sent_map_[message] = std::time(nullptr);
-    }
-
-    void send_message(SlackStatusSender * sender, std::string & message) {
-        send_message(sender, message, -1);
-    }
-
-    void send_message(SlackStatusSender * sender, std::string & message, int interval) {
-        if (!need_debounce_message(message, interval)) {
-            sender->send(message);
-            register_message(message);
-        }
-    }
-
-    SlackStatusSender * getSlackInfraChannel() {
-        if (slackPost == nullptr) {
-            slackPost = new SlackStatusSender("hooks.slack.com", slack_app_url_);
-        }
-        return slackPost;
     }
 
     std::vector<std::string>
@@ -628,100 +599,10 @@ public:
             auto & line = lines.at(n);
             if (!line.empty()) {
                 auto data = command_line_blanks_posit_parse(line, idxs);
-                result.emplace_back(as_json_string(data));
-            }
-        }
-        return result;
-    }
-
-    std::vector<std::string>
-    process_lines_by_blank(const std::vector<std::string> & lines, const std::vector<std::string> & names) {
-        std::vector<std::string> result;
-
-        for (const auto & line : lines) {
-            if (!line.empty()) {
-                auto values = split_trim(line, " ");
-                std::vector<std::pair<std::string, std::string>> data;
-                if (values.size() > names.size()) {
-                    data.emplace_back(std::pair<std::string, std::string>("ERROR", line));
-                    continue;
-                }
-                for (auto i = 0; i < values.size(); i++) {
-                    auto value = values[i];
-                    auto name = i < names.size() ? names[i] : "";
-                    data.emplace_back(std::pair<std::string, std::string>(name, value));
-                }
                 result.push_back(as_json_string(data));
             }
         }
         return result;
-    }
-
-    std::string unpack_iftop_line( std::vector<std::string> & params,
-                                   std::vector<std::string> & names,
-                                   std::string direction) {
-        std::vector<std::string> tmp;
-        for (auto i=0; i< params.size(); i++) {
-
-            if(i >= names.size()) {
-                break;
-            }
-            auto & value = params[i];
-            auto & name = names[i];
-            if (name == "-") {
-                continue;
-            }
-            if (name == "TXRX") {
-                value = direction;
-            }
-
-            tmp.push_back("{\"" + name + "\":\"" + value + "\"}");
-        }
-        return join(tmp, ",");
-    }
-
-    std::string iftop_usage() {
-        std::string filename = "iftop-result.txt";
-
-        std::vector<std::string> result;
-        std::vector<std::string> tx_names{"-", "-", "IP", "TXRX", "2sec", "10sec", "40sec", "cumulative"};
-        std::vector<std::string> rx_names{"-", "IP", "TXRX", "2sec", "10sec", "40sec", "cumulative"};
-        std::vector<std::string> total_names{"2sec", "10sec", "40sec"};
-
-        auto started = 0;
-        bool first_parsed_line = true;
-
-        for (auto line: file_as_lines(filename)) {
-            if(line.size() > 2  && line[0] == '=') {
-                break;
-            }
-            if(line.size() > 2  && line[0] == '-') {
-                started += 1;
-                continue;
-            }
-            if (started == 0) {
-                continue;
-            }
-            std::vector<std::string> params = split(line, " ");
-            std::string item;
-            if (started == 1) {
-                auto item_regular = first_parsed_line
-                        ? unpack_iftop_line(params, tx_names, std::string("TX"))
-                        : unpack_iftop_line(params, rx_names, std::string("RX"));
-                first_parsed_line = !first_parsed_line;
-                item = "[" + item_regular + "]";
-            }
-            if (started >= 2) {
-                std::vector<std::string> base_params = split(line, ":");
-                if (base_params.size() > 1) {
-                    params = split(base_params[1], " ");
-                    auto item_total = unpack_iftop_line(params, total_names, std::string(""));
-                    item = "{\"" + trim(base_params[0]) + "\":[" + item_total + "]}";
-                }
-            }
-            result.push_back(item);
-        }
-        return inject_common_data("iftop", "[" + join(result, ",") + "]");
     }
 
     std::string compose_message(std::string message_type) {
@@ -737,9 +618,6 @@ public:
         if (message_type == "cpu" ) {
             return cpu_usage_report(hostname);
         }
-        if (message_type == "iftop") {
-            return iftop_usage();
-        }
         if (message_type == "net" ) {
             return network_usage_report(hostname);
         }
@@ -748,36 +626,6 @@ public:
         }
         if (message_type == "disk") {
             return disk_space(extra_params_[message_type]);
-        }
-        if (message_type == "hostinfo") {
-            auto host_info = exec_command("hostnamectl");
-            std::vector<std::pair<std::string, std::string>> data;
-            if (!host_info.empty()) {
-                for (const auto & line : split(host_info, "\n")) {
-                    if (!line.empty()) {
-                        auto params = split(line, ":");
-                        if (params.size() >= 2) {
-                            auto name = trim(params[0]);
-                            auto value = trim(params[1]);
-                            data.emplace_back(std::pair<std::string, std::string>(name, value));
-                        }
-                    }
-                }
-                auto result = as_json_string(data);
-                return inject_common_data(action, result);
-            }
-        }
-        if (message_type == "tcp") {
-            auto posts_info = exec_command("ss  -tlnp"); // TCP ... UDP - -tulnp
-            if (!posts_info.empty()) {
-                std::vector<std::string> res;
-                boost::replace_all(posts_info, " Address", ":Address");
-                const auto names = split("State,Recv-Q,Send-Q,Local:Address:Port,Peer:Address:Port,Process,Unknown1,Unknown2m,Unknown3", ",");
-                const auto lines = split(posts_info, "\n");
-
-                auto result = process_lines_by_blank(lines, names);
-                return inject_common_data(action, "[" + join(result, ",") + "]");
-            }
         }
         if (message_type == "docker") {
             auto docker_info = exec_command("docker ps --no-trunc -a");
@@ -791,32 +639,17 @@ public:
                 return inject_common_data(action, "[" + join(result, ",") + "]");
             }
         }
-        if (message_type == "iostat") {
-            // TBD
-        }
-        if (message_type == "ioping") {
-            // TBD - used together with 'df'
-        }
-        if (message_type == "host") {
-            std::vector<std::string> result;
-            std::vector<std::pair<std::string, std::string>> host_status;
+        if (message_type == "tcp") {
+            auto posts_info = exec_command("ss  -tlnp"); // TCP ... UDP - -tulnp
+            if (!posts_info.empty()) {
+                std::vector<std::string> res;
+                boost::replace_all(posts_info, " Address", ":Address");
+                const auto names = split("State,Recv-Q,Send-Q,Local:Address:Port,Peer:Address:Port,Process", ",");
+                const auto lines = split(posts_info, "\n");
 
-            std::string mount_point_str = extra_params_[message_type];
-            std::vector<std::string> hosts = split_trim(mount_point_str, ";");
-            for (auto const & host : hosts) {
-                auto const cmd = "netcat -zvw1 " + host + " 22 2>&1";
-                auto host_resp = exec_command(cmd.c_str());
-                std::string status = "OK";
-                if (host_resp.find("succeeded") == std::string::npos) {
-                    auto message = ":fire: :fire: :fire: *ERROR* HOST " + host + " *DOWN*";
-                    send_message(getSlackInfraChannel(), message);
-                    status = "ERROR";
-                }
-                host_status.push_back(std::pair<std::string, std::string>(host, status));
+                auto result = process_lines_by_blank(lines, names);
+                return inject_common_data(action, "[" + join(result, ",") + "]");
             }
-            result.push_back(as_json_string(host_status));
-            auto rs = result.empty() ? "" : join(result, ",");
-            return inject_common_data(action, "[" + rs + "]");
         }
         if (message_type == "python") {
             command = "ps -eo pcpu,pmem,pid,ppid,user,etime,command | grep python";
@@ -834,16 +667,14 @@ public:
             const auto lines = split(ps_info, "\n");
 
             std::vector<std::string> result;
-            for (ulong n = 0; n < lines.size(); n++) {
+            for (ulong n = 1; n < lines.size(); n++) {
                 auto & line = lines.at(n);
                 if (!line.empty()) {
                     auto data = parse_command_line_ps(line, 6, names);
                     result.push_back(as_json_string(data));
                 }
             }
-
-            auto rs = result.empty() ? "" : join(result, ",");
-            return inject_common_data(action, "[" + rs + "]");
+            return inject_common_data(action, "[" + join(result, ",") + "]");
         }
         if (message_type == "df") {
             auto df_info = exec_command("df -l");
@@ -869,12 +700,37 @@ public:
                     }
                 }
                 for (ulong j=0; j<names.size(); j++) {
-                    data.push_back(std::pair<std::string, std::string>(names[j], values[j]));
+                    data.push_back(std::pair(names[j], values[j]));
                 }
                 result.push_back(as_json_string(data));
             }
             return inject_common_data(action, "[" + join(result, ",") + "]");
         }
+#ifdef SLACK_USING
+        if (message_type == "host") {
+            std::vector<std::string> result;
+            std::vector<std::pair<std::string, std::string>> host_status;
+
+            std::string mount_point_str = extra_params_[message_type];
+            std::vector<std::string> hosts = split_trim(mount_point_str, ";");
+            for (auto const & host : hosts) {
+                auto const cmd = "netcat -zvw1 " + host + " 22 2>&1";
+                auto host_resp = exec_command(cmd.c_str());
+                std::string status = "OK";
+                if (host_resp.find("succeeded") == std::string::npos) {
+                    if (slackPost == nullptr) {
+                        slackPost = new SlackStatusSender("hooks.slack.com", SLACK_CHANNEL);
+                    }
+                    slackPost->send(":fire: :fire: :fire: *ERROR* HOST " + host + " *DOWN*");
+                    status = "ERROR";
+                }
+                host_status.push_back(std::pair<std::string, std::string>(host, status));
+            }
+            result.push_back(as_json_string(host_status));
+            auto rs = result.empty() ? "" : join(result, ",");
+            return inject_common_data(action, "[" + rs + "]");
+        }
+#endif
         return "INVALID MODE";
     }
 
@@ -883,7 +739,7 @@ public:
             std::cout << message << "\n\n";
         }
         socket_.async_send_to(boost::asio::buffer(message), endpoint_,
-                              [](const boost::system::error_code& ec, size_t bytes_recvd){ handle_and_do_noting(ec, bytes_recvd); });
+                              [this](const boost::system::error_code& ec, size_t bytes_recvd){ handle_and_do_noting(ec, bytes_recvd); });
     }
 
     void send_message_and_next(std::string message) {
@@ -918,72 +774,35 @@ public:
         return false;
     }
 
-    void check_send_daily_report() {
-        std::string message = "dailyreport";
-        if (extra_params_.find(message) != extra_params_.end()) {
-            std::string dailyreport_str = extra_params_[message];
-            std::vector<std::string> timeparts = split_trim(dailyreport_str, "-");
-            int hour =  8;
-            int min =  0;
-            if (timeparts.size() == 2) {
-                try {
-                    hour = atoi(timeparts[0].c_str());
-                    min  = atoi(timeparts[1].c_str());
-                }
-                catch (const std::exception &e) {
-                }
-
-                std::time_t current_time = std::time(nullptr);
-                std::tm *utc_time = std::gmtime(&current_time);
-
-                if (utc_time->tm_hour == hour && utc_time->tm_min >= min) {
-                    auto hostname = get_hostname();
-                    auto msg = std::string(":large_green_circle: *HOST AGENT OK* Host: [" + hostname + "]");
-                    send_message(getSlackInfraChannel(), msg, 60 * 60 * 24);
-                }
-            }
-        }
-    }
-
     void handle_timeout(const boost::system::error_code& ec) {
-        int cnt = 0;
         while (true) {
             uint64_t current_time = time_current_seconds();
             if (need_start("disk", current_time))   send_message(compose_message("disk"));
             if (need_start("docker", current_time)) send_message(compose_message("docker"));
             if (need_start("ps", current_time))     send_message(compose_message("ps"));
             if (need_start("df", current_time))     send_message(compose_message("df"));
-            if (need_start("tcp", current_time))    send_message(compose_message("tcp"));
             if (need_start("net", current_time))    send_message(compose_message("net"));
+            if (need_start("tcp", current_time))    send_message(compose_message("tcp"));
             if (need_start("memory", current_time)) send_message(compose_message("memory"));
-            if (need_start("hostinfo", current_time)) send_message(compose_message("hostinfo"));
-            if (need_start("iftop", current_time))  send_message(compose_message("iftop"));
-            if (need_start("host", current_time))   send_message(compose_message("host"));
             if (need_start("python", current_time)) send_message(compose_message("python"));
             if (need_start("cpu", current_time))    send_message(compose_message("cpu"));
-
-            std::this_thread::sleep_for(std::chrono::milliseconds(1 * 500));
-            if (++cnt > 10000000) {
-                cnt = 0;
-            }
-            if (cnt % 120 == 0) {
-                check_send_daily_report();
-            }
+#ifdef SLACK_USING
+            if (need_start("host", current_time))   send_message(compose_message("host"));
+#endif
+            std::this_thread::sleep_for(std::chrono::milliseconds(1 * 1000));
         }
     }
 };
 
-void usage_massage(const char * pname, const char * example) {
-    std::cerr << "VERSION: [" << VERSION  << "]\n";
-    std::cerr << "USAGE:" << pname << " <multicast group / UDP IP > <port> <default_timeout_sec> [--actions=\"cpu:N,disk:N[<mount1;mount2;..>],df:N[<mount1;..>],ps:N,python:N,iftop:N,hostinfo:N,docker:N\", ...]  [-d | -p]\n";
-    std::cerr << "FULL EXAMPLE: " << pname << " 127.0.0.1 6666 60 --actions=" << example << "\n";
+
+void usage_massage(const char * pname) {
+    std::cerr << "version: [" << VERSION  << "] usage:" << pname << " <multicast group / UDP IP > <port> <default_timeout_sec> [--actions=\"cpu:N,disk:N[<mount1;mount2;..>],df:N[<mount1;..>],ps:N,python:N,docker:N\"]  [-d | -p]\n";
 }
 
-int main(int argc, char* argv[]) {
-    auto params = "\"cpu:5,disk:120[/],df:120[/;/data],dailyreport[7-00],ps:30,net:20,memory:30,python:30,tcp:30,hostinfo,docker:120\"";
+int _main(int argc, char* argv[]) {
     try {
         if (argc < 4) {
-            usage_massage(argv[0], params);
+            usage_massage(argv[0]);
             return EXIT_FAILURE;
         }
         auto address = argv[1];
@@ -991,6 +810,7 @@ int main(int argc, char* argv[]) {
         auto timeout_sec = argv[3];
         bool need_daemonize = false;
         bool self_print = false;
+        auto params = "\"cpu:5,disk:120[/],df:120[/],ps:30,net:20,memory:30,tcp:30,python:30,docker:120\"";
 
         if (argc > 4 && std::string(argv[4]).find("--actions=") == 0) {
             params = argv[4];
@@ -1005,12 +825,12 @@ int main(int argc, char* argv[]) {
             }
             else {
                 std::cout << "unrecognised key '" << std::string(argv[5]) << "'\n";
-                usage_massage(argv[0], params);
+                usage_massage(argv[0]);
                 return EXIT_FAILURE;
             }
         }
 
-        std::cout << "\"" << argv[0] << "\" started. Version: " << VERSION << "\n";
+        std::cout << "\"" << argv[0] << "\" started. \n";
         std::cout << "address: [" << address << "]   port: [" << port << "] default timeout: [" << timeout_sec << "] sec; " <<  params << "\n";
 
         if (need_daemonize) {
@@ -1019,13 +839,7 @@ int main(int argc, char* argv[]) {
         }
 
         boost::asio::io_context ioc;
-        PerformSender sender(ioc,
-                             atoi(timeout_sec),
-                             boost::asio::ip::address::from_string(address),
-                             (short unsigned)atoi(port),
-                             params,
-                             "",    // will be added as an command line argument late
-                             self_print);
+        PerformSender sender(ioc, atoi(timeout_sec), boost::asio::ip::address::from_string(address), (short unsigned)atoi(port), params, self_print);
         ioc.run();
     }
     catch (std::exception& e) {
@@ -1035,9 +849,25 @@ int main(int argc, char* argv[]) {
     return EXIT_SUCCESS;
 }
 
-/*
-sudo apt-get update
-sudo apt-get install libssl-dev
-g++ -o https_post https_post.cpp -lboost_system -lboost_filesystem -lssl -lcrypto -lboost_thread -lpthread
- *
- **/
+
+int main(int argc, char* argv[]) {
+    try {
+
+        auto address = "127.0.0.1";
+        auto port = "20007";
+        auto timeout_sec = "1";
+
+        auto params = "--actions=df:30[/;/data]";
+//        auto params = "--actions=\"df:20\"";
+        boost::asio::io_context ioc;
+        PerformSender sender(ioc, atoi(timeout_sec),
+                          boost::asio::ip::address::from_string(address),
+                      (short unsigned)atoi(port), params, true);
+        ioc.run();
+    }
+    catch (std::exception& e) {
+        std::cerr << "std::exception: " << e.what() << '\n';
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
