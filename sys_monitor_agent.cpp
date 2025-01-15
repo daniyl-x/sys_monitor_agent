@@ -295,6 +295,9 @@ std::string get_memory_info() {
         std::string name;
         unsigned long long value;
         iss >> name >> value;
+        if (':' == name.back()) {
+            name.pop_back();
+        }
         result.push_back("{\"" + name + "\":" + std::to_string(value) + "}");
     }
     return "[" + join(result, ",") + "]";
@@ -797,6 +800,17 @@ public:
         if (message_type == "ioping") {
             // TBD - used together with 'df'
         }
+        if (message_type == "date") {
+            std::vector<std::string> result;
+            std::vector<std::pair<std::string, std::string>> date_status;
+
+            std::string mount_point_str = extra_params_[message_type];
+            std::vector<std::string> hosts = split_trim(mount_point_str, ";");
+            auto const cmd = "date +'%Y-%m-%d %H:%M:%S.%4N %Z %:z'";
+            auto resp = exec_command(cmd);
+            resp.pop_back();   // remove \n
+            return inject_common_data(action, "\"" + resp + "\"");
+        }
         if (message_type == "host") {
             std::vector<std::string> result;
             std::vector<std::pair<std::string, std::string>> host_status;
@@ -949,18 +963,19 @@ public:
         int cnt = 0;
         while (true) {
             uint64_t current_time = time_current_seconds();
-            if (need_start("disk", current_time))   send_message(compose_message("disk"));
-            if (need_start("docker", current_time)) send_message(compose_message("docker"));
-            if (need_start("ps", current_time))     send_message(compose_message("ps"));
-            if (need_start("df", current_time))     send_message(compose_message("df"));
-            if (need_start("tcp", current_time))    send_message(compose_message("tcp"));
-            if (need_start("net", current_time))    send_message(compose_message("net"));
-            if (need_start("memory", current_time)) send_message(compose_message("memory"));
-            if (need_start("hostinfo", current_time)) send_message(compose_message("hostinfo"));
-            if (need_start("iftop", current_time))  send_message(compose_message("iftop"));
-            if (need_start("host", current_time))   send_message(compose_message("host"));
-            if (need_start("python", current_time)) send_message(compose_message("python"));
-            if (need_start("cpu", current_time))    send_message(compose_message("cpu"));
+            if (need_start("disk", current_time))       send_message(compose_message("disk"));
+            if (need_start("docker", current_time))     send_message(compose_message("docker"));
+            if (need_start("ps", current_time))         send_message(compose_message("ps"));
+            if (need_start("df", current_time))         send_message(compose_message("df"));
+            if (need_start("tcp", current_time))        send_message(compose_message("tcp"));
+            if (need_start("net", current_time))        send_message(compose_message("net"));
+            if (need_start("memory", current_time))     send_message(compose_message("memory"));
+            if (need_start("hostinfo", current_time))   send_message(compose_message("hostinfo"));
+            if (need_start("iftop", current_time))      send_message(compose_message("iftop"));
+            if (need_start("host", current_time))       send_message(compose_message("host"));
+            if (need_start("date", current_time))       send_message(compose_message("date"));
+            if (need_start("python", current_time))     send_message(compose_message("python"));
+            if (need_start("cpu", current_time))        send_message(compose_message("cpu"));
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1 * 500));
             if (++cnt > 10000000) {
