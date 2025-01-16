@@ -33,10 +33,10 @@ namespace ssl = boost::asio::ssl;
 
 typedef unsigned long int ulong;
 
-std::string VERSION = "1.12.0 (free) tcp host dailyreport hostinfo iftop xtext";
+std::string VERSION = "1.12.1 (free) tcp host dailyreport hostinfo iftop xtext";
 int DEBOUNCE_TIME_SEC = 10 * 60;
 
-std::string APP_KEY = "TESTKEYFORNOW";
+std::string APP_KEY = "NEWTESTKEY";
 
 std::string get_app_key() {
     return APP_KEY;
@@ -268,6 +268,10 @@ std::string network_usage() {
     for (ulong i=0; i<network_start_status.size(); i++) {
         auto n1 = network_start_status[i];
         auto n2 = network_stop_status[i];
+        auto name = n1.name;
+        if (':' == name.back()) {
+            name.pop_back();
+        }
         result.push_back(
           "{ \"name\":\""       + n1.name + "\""
         + ", \"read\":"         + std::to_string((n2.rx_bytes - n1.rx_bytes) / duration)
