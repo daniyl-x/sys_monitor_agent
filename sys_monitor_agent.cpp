@@ -21,22 +21,29 @@
 #include <thread>
 #include <unordered_set>
 
-#include <boost/asio/ssl.hpp>
+
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
+
+#ifdef USESSL
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include <boost/asio/ssl.hpp>
 #include <boost/beast/ssl.hpp>
+namespace ssl = boost::asio::ssl;
+#endif
 
 namespace beast = boost::beast;
 namespace http = beast::http;
-namespace ssl = boost::asio::ssl;
 
 typedef unsigned long int ulong;
 
-std::string VERSION = "1.12.1 (free) tcp host dailyreport hostinfo iftop xtext";
+std::string VERSION = "1.13.0 (free) tcp host dailyreport hostinfo iftop xtext";
 int DEBOUNCE_TIME_SEC = 10 * 60;
 
 std::string APP_KEY = "NEWTESTKEY";
+std::string CRYPTO_KEY = "";
 
 std::string get_app_key() {
     return APP_KEY;
@@ -75,7 +82,7 @@ void daemonize() {
     signal(SIGINT, signalHandler);
 }
 
-
+#ifdef USESSL
 class SlackStatusSender {
 private:
     boost::asio::io_context ioc_;
@@ -96,6 +103,7 @@ public:
     }
 
     void send(const std::string & message)  {
+
         beast::ssl_stream<beast::tcp_stream> stream_(ioc_, ctx_);
         auto _ = beast::get_lowest_layer(stream_).connect(host_resolved_);
         stream_.handshake(ssl::stream_base::client);
@@ -119,7 +127,135 @@ public:
         stream_.shutdown(ec);
     }
 };
+#endif
 
+
+#ifdef USESSL
+std::vector<unsigned char> aesEncrypt(const std::string& plaintext, const std::string& key, const std::string& iv) {
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new(); // Create and initialize the context
+    if (!ctx) {
+        throw std::runtime_error("Failed to create EVP_CIPHER_CTX");
+    }
+
+    std::vector<unsigned char> ciphertext(plaintext.size() + EVP_MAX_BLOCK_LENGTH); // Allocate space for ciphertext
+    int len = 0;
+    int ciphertext_len = 0;
+
+    // Initialize encryption operation
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr,
+                           reinterpret_cast<const unsigned char*>(key.data()),
+                           reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("Failed to initialize encryption");
+    }
+
+    // Encrypt the plaintext
+    if (EVP_EncryptUpdate(ctx, ciphertext.data(), &len,
+                          reinterpret_cast<const unsigned char*>(plaintext.data()),
+                          plaintext.size()) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("Failed to encrypt");
+    }
+    ciphertext_len += len;
+
+    // Finalize encryption
+    if (EVP_EncryptFinal_ex(ctx, ciphertext.data() + len, &len) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        throw std::runtime_error("Failed to finalize encryption");
+    }
+    ciphertext_len += len;
+
+    // Cleanup
+    EVP_CIPHER_CTX_free(ctx);
+
+    // Resize ciphertext to the actual size
+    ciphertext.resize(ciphertext_len);
+    return ciphertext;
+}
+
+std::string bytesToHex(const std::vector<unsigned char>& bytes) {
+    std::ostringstream oss;
+    for (unsigned char byte : bytes) {
+        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
+    }
+    return oss.str();
+}
+
+
+int encript_main() {
+    // Key and IV should be 32 bytes and 16 bytes respectively for AES-256-CBC
+    const std::string key = "01234567890123456789012345678901"; // 32 bytes
+    const std::string iv = "0123456789012345";                 // 16 bytes
+
+    std::string plaintext = "Hello, AES Encryption!";
+
+    try {
+        // Encrypt the plaintext
+        std::vector<unsigned char> encrypted = aesEncrypt(plaintext, key, iv);
+
+        // Convert the encrypted bytes to a readable hex string
+        std::string encryptedHex = bytesToHex(encrypted);
+        std::cout << "Encrypted (hex): " << encryptedHex << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        return 1;
+    }
+
+    return 0;
+}
+#endif
+
+#ifdef USESSL
+
+#include <boost/crypto.hpp>
+std::string aesEncrypt(const std::string& plaintext, const std::string& key, const std::string& iv) {
+    namespace crypto = boost::crypto;
+
+    // Ensure the key and IV are the correct size
+    if (key.size() != crypto::aes::key_size<256>::value) {
+        throw std::runtime_error("Key must be 256 bits (32 bytes).");
+    }
+    if (iv.size() != crypto::aes::block_size::value) {
+        throw std::runtime_error("IV must be 16 bytes.");
+    }
+
+    // Create the AES encryption object in CBC mode
+    crypto::aes::cbc_encryptor encryptor(
+        std::vector<uint8_t>(key.begin(), key.end()),
+        std::vector<uint8_t>(iv.begin(), iv.end())
+    );
+
+    // Perform encryption
+    std::vector<uint8_t> input(plaintext.begin(), plaintext.end());
+    std::vector<uint8_t> encrypted = encryptor.process(input);
+
+    return std::string(encrypted.begin(), encrypted.end());
+}
+
+int main() {
+    try {
+        // Example input
+        std::string plaintext = "Hello, AES encryption!";
+        std::string key = "0123456789abcdef0123456789abcdef"; // 32-byte key (256-bit)
+        std::string iv = "abcdef1234567890";                  // 16-byte IV
+
+        // Encrypt the plaintext
+        std::string encrypted = aesEncrypt(plaintext, key, iv);
+
+        // Print encrypted data in hex format
+        std::cout << "Encrypted: ";
+        for (unsigned char c : encrypted) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)c;
+        }
+        std::cout << std::endl;
+
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+
+    return 0;
+}
+#endif
 
 uint64_t time_current_seconds() {
     using namespace std::chrono;
@@ -535,7 +671,9 @@ private:
     boost::unordered_map<std::string, uint64_t> timeouts_;
     boost::unordered_map<std::string, std::string> extra_params_;
 
+#ifdef USESSL
     SlackStatusSender *  slackPost = nullptr;
+#endif
     std::unordered_map<std::string, std::time_t> message_sent_map_;
 
 public:
@@ -609,6 +747,7 @@ public:
         message_sent_map_[message] = std::time(nullptr);
     }
 
+#ifdef USESSL
     void send_message(SlackStatusSender * sender, std::string & message) {
         send_message(sender, message, -1);
     }
@@ -626,7 +765,7 @@ public:
         }
         return slackPost;
     }
-
+#endif
     std::vector<std::string>
     process_lines(const std::vector<std::string> & lines, const std::vector<std::string> & names) {
         std::vector<std::string> result;
@@ -825,11 +964,13 @@ public:
                 auto const cmd = "netcat -zvw1 " + host + " 22 2>&1";
                 auto host_resp = exec_command(cmd.c_str());
                 std::string status = "OK";
+#ifdef USESSL
                 if (host_resp.find("succeeded") == std::string::npos) {
                     auto message = ":fire: :fire: :fire: *ERROR* HOST " + host + " *DOWN*";
                     send_message(getSlackInfraChannel(), message);
                     status = "ERROR";
                 }
+#endif
                 host_status.push_back(std::pair<std::string, std::string>(host, status));
             }
             result.push_back(as_json_string(host_status));
@@ -961,8 +1102,10 @@ public:
 
                 if (utc_time->tm_hour == hour && utc_time->tm_min >= min) {
                     auto hostname = get_hostname();
+#ifdef USESSL
                     auto msg = std::string(":large_green_circle: *HOST AGENT OK* Host: [" + hostname + "]");
                     send_message(getSlackInfraChannel(), msg, 60 * 60 * 24);
+#endif
                 }
             }
         }
@@ -1006,6 +1149,8 @@ void usage_massage(const char * pname, const char * example) {
 
 int main(int argc, char* argv[]) {
     auto params = "\"cpu:5,disk:120[/],df:120[/;/data],dailyreport[7-00],ps:30,net:20,memory:30,python:30,tcp:30,hostinfo,docker:120\"";
+    auto apikey = "";
+    auto securekey = "";
     try {
         if (argc < 4) {
             usage_massage(argv[0], params);
@@ -1017,22 +1162,32 @@ int main(int argc, char* argv[]) {
         bool need_daemonize = false;
         bool self_print = false;
 
-        if (argc > 4 && std::string(argv[4]).find("--actions=") == 0) {
-            params = argv[4];
-        }
-
-        if (argc > 5) {
+        for (auto i=4; i<argc; i++) {
+            if(std::string(argv[i]).find("--actions=") == 0) {
+                params = argv[i];
+                continue;
+            }
+            if(std::string(argv[i]).find("--apikey=") == 0) {
+                apikey = argv[i] + strlen("--apikey=");
+                APP_KEY = std::string(apikey);
+                continue;
+            }
+            if(std::string(argv[i]).find("--securekey=") == 0) {
+                securekey = argv[i] + strlen("--securekey=");
+                CRYPTO_KEY = std::string(securekey);
+                continue;
+            }
             if (std::string(argv[5]) == "-d") {
                 need_daemonize = true;
+                continue;
             }
-            else if (std::string(argv[5]) == "-p") {
+            if (std::string(argv[5]) == "-p") {
                 self_print = true;
+                continue;
             }
-            else {
-                std::cout << "unrecognised key '" << std::string(argv[5]) << "'\n";
-                usage_massage(argv[0], params);
-                return EXIT_FAILURE;
-            }
+            std::cout << "unrecognised key '" << std::string(argv[5]) << "'\n";
+            usage_massage(argv[0], params);
+            return EXIT_FAILURE;
         }
 
         std::cout << "\"" << argv[0] << "\" started. Version: " << VERSION << "\n";
