@@ -33,7 +33,7 @@ namespace ssl = boost::asio::ssl;
 
 typedef unsigned long int ulong;
 
-std::string VERSION = "1.10.0 (free) tcp host dailyreport hostinfo iftop";
+std::string VERSION = "1.12.0 (free) tcp host dailyreport hostinfo iftop xtext";
 int DEBOUNCE_TIME_SEC = 10 * 60;
 
 std::string APP_KEY = "TESTKEYFORNOW";
@@ -837,6 +837,11 @@ public:
             action = "python";
             message_type = "_ps";
         }
+        if (message_type == "xtest") {
+            command = "ps -eo pcpu,pmem,pid,ppid,user,etime,command | grep XTEST";
+            action = "xtest";
+            message_type = "_ps";
+        }
         if (message_type == "ps") {
             command = "ps -eo pcpu,pmem,pid,ppid,user,etime,command";
             action = "ps";
@@ -975,6 +980,7 @@ public:
             if (need_start("host", current_time))       send_message(compose_message("host"));
             if (need_start("date", current_time))       send_message(compose_message("date"));
             if (need_start("python", current_time))     send_message(compose_message("python"));
+            if (need_start("xtext", current_time))      send_message(compose_message("xtext"));
             if (need_start("cpu", current_time))        send_message(compose_message("cpu"));
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1 * 500));
