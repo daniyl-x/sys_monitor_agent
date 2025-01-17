@@ -26,6 +26,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
 
+//#define USESSL
 #ifdef USESSL
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -39,7 +40,7 @@ namespace http = beast::http;
 
 typedef unsigned long int ulong;
 
-std::string VERSION = "1.13.0 (free) tcp host dailyreport hostinfo iftop xtext";
+std::string VERSION = "1.13.1 (free) tcp host dailyreport hostinfo iftop xtext";
 int DEBOUNCE_TIME_SEC = 10 * 60;
 
 std::string APP_KEY = "NEWTESTKEY";
@@ -130,80 +131,6 @@ public:
 #endif
 
 
-#ifdef USESSL
-std::vector<unsigned char> aesEncrypt(const std::string& plaintext, const std::string& key, const std::string& iv) {
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new(); // Create and initialize the context
-    if (!ctx) {
-        throw std::runtime_error("Failed to create EVP_CIPHER_CTX");
-    }
-
-    std::vector<unsigned char> ciphertext(plaintext.size() + EVP_MAX_BLOCK_LENGTH); // Allocate space for ciphertext
-    int len = 0;
-    int ciphertext_len = 0;
-
-    // Initialize encryption operation
-    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr,
-                           reinterpret_cast<const unsigned char*>(key.data()),
-                           reinterpret_cast<const unsigned char*>(iv.data())) != 1) {
-        EVP_CIPHER_CTX_free(ctx);
-        throw std::runtime_error("Failed to initialize encryption");
-    }
-
-    // Encrypt the plaintext
-    if (EVP_EncryptUpdate(ctx, ciphertext.data(), &len,
-                          reinterpret_cast<const unsigned char*>(plaintext.data()),
-                          plaintext.size()) != 1) {
-        EVP_CIPHER_CTX_free(ctx);
-        throw std::runtime_error("Failed to encrypt");
-    }
-    ciphertext_len += len;
-
-    // Finalize encryption
-    if (EVP_EncryptFinal_ex(ctx, ciphertext.data() + len, &len) != 1) {
-        EVP_CIPHER_CTX_free(ctx);
-        throw std::runtime_error("Failed to finalize encryption");
-    }
-    ciphertext_len += len;
-
-    // Cleanup
-    EVP_CIPHER_CTX_free(ctx);
-
-    // Resize ciphertext to the actual size
-    ciphertext.resize(ciphertext_len);
-    return ciphertext;
-}
-
-std::string bytesToHex(const std::vector<unsigned char>& bytes) {
-    std::ostringstream oss;
-    for (unsigned char byte : bytes) {
-        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte);
-    }
-    return oss.str();
-}
-
-
-int encript_main() {
-    // Key and IV should be 32 bytes and 16 bytes respectively for AES-256-CBC
-    const std::string key = "01234567890123456789012345678901"; // 32 bytes
-    const std::string iv = "0123456789012345";                 // 16 bytes
-
-    std::string plaintext = "Hello, AES Encryption!";
-
-    try {
-        // Encrypt the plaintext
-        std::vector<unsigned char> encrypted = aesEncrypt(plaintext, key, iv);
-
-        // Convert the encrypted bytes to a readable hex string
-        std::string encryptedHex = bytesToHex(encrypted);
-        std::cout << "Encrypted (hex): " << encryptedHex << std::endl;
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
-        return 1;
-    }
-
-    return 0;
-}
-#endif
 
 #ifdef USESSL
 
@@ -1177,11 +1104,11 @@ int main(int argc, char* argv[]) {
                 CRYPTO_KEY = std::string(securekey);
                 continue;
             }
-            if (std::string(argv[5]) == "-d") {
+            if (std::string(argv[i]) == "-d") {
                 need_daemonize = true;
                 continue;
             }
-            if (std::string(argv[5]) == "-p") {
+            if (std::string(argv[i]) == "-p") {
                 self_print = true;
                 continue;
             }
