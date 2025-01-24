@@ -26,7 +26,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
 
-//#define USESSL
+#define USESSL
 #ifdef USESSL
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -133,7 +133,7 @@ public:
 
 
 
-#ifdef USESSL
+#ifdef CRYPTO_USESSL
 
 #include <boost/crypto.hpp>
 std::string aesEncrypt(const std::string& plaintext, const std::string& key, const std::string& iv) {
