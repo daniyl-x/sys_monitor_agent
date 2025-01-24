@@ -1132,7 +1132,7 @@ void usage_massage(const char * pname, const char * example) {
 }
 
 int main(int argc, char* argv[]) {
-    auto params = "\"cpu:5,disk:120[/],df:120[/;/data],dailyreport[7-00],ps:30,net:20,memory:30,python:30,tcp:30,hostinfo,docker:120\"";
+    auto params = "\"cpu:5,disk:120[/],df:120[/;/data],dailyreport[7-00],ps:30,net:20,memory:30,python:30,tcp:30,hostinfo,docker:120,kill_mem:60[20]\"";
     auto apikey = "";
     auto securekey = "";
     auto sysroot = "/";
