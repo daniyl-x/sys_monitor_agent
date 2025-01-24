@@ -40,11 +40,12 @@ namespace http = beast::http;
 
 typedef unsigned long int ulong;
 
-std::string VERSION = "1.13.1 (free) tcp host dailyreport hostinfo iftop xtext";
+std::string VERSION = "1.14.0 (free) tcp host dailyreport hostinfo iftop xtext kill_mem";
 int DEBOUNCE_TIME_SEC = 10 * 60;
 
 std::string APP_KEY = "NEWTESTKEY";
 std::string CRYPTO_KEY = "";
+std::string SYSTEM_ROOT = "/";
 
 std::string get_app_key() {
     return APP_KEY;
@@ -582,6 +583,11 @@ std::vector<std::string> file_as_lines(std::string & filename) {
     return result;
 }
 
+void kill_process(int current_pid) {
+    auto command = "kill -9 " + std::to_string(current_pid);
+    auto ps_info = exec_command(command.c_str());
+}
+
 
 class PerformSender {
 private:
@@ -924,14 +930,63 @@ public:
             const auto names = split("PCPU,PMEM,PID,PPID,USER,ELAPSED,COMMAND", ",");
             const auto lines = split(ps_info, "\n");
 
+            auto current_pid = -1;
             std::vector<std::string> result;
             for (ulong n = 0; n < lines.size(); n++) {
                 auto & line = lines.at(n);
                 if (!line.empty()) {
                     auto data = parse_command_line_ps(line, 6, names);
                     result.push_back(as_json_string(data));
+                    if (action == "kill_cpu" || action == "kill_mem") {
+                        for (auto &p: data) {
+                            if (p.first == "PID") {
+                                current_pid = atoi(p.second.c_str());
+                                break;
+                            }
+                        }
+                    }
+                    if (action == "kill_cpu") {
+                        auto max_cpu_bound = atoi(extra_params_["kill_cpu"].c_str());
+                        if (max_cpu_bound > 1) { // minimal value just for avoiding error stopped
+                            for (auto &p: data) {
+                                if (p.first == "PCPU") {
+                                    auto cpu_usage = atoi(p.second.c_str());
+                                    if (cpu_usage > max_cpu_bound) {
+                                        kill_process(current_pid);
+                                        auto message =
+                                                ":fire: *Attention* Python Process [" + std::to_string(current_pid)
+                                                + "] was kill because CPU " + std::to_string(cpu_usage)
+                                                + "% exceed the limit " + std::to_string(max_cpu_bound) +
+                                                "%; Process info: " + line;
+//                                        send_message(getSlackInfraChannel(), message);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (action == "kill_mem") {
+                        auto max_mem_bound = atoi(extra_params_["kill_mem"].c_str());
+                        if (max_mem_bound > 1) {
+                            for (auto &p: data) {
+                                if (p.first == "PMEM") {
+                                    auto mem_usage = atoi(p.second.c_str());
+                                    if (mem_usage > max_mem_bound) {
+                                        kill_process(current_pid);
+                                        auto message =
+                                                ":fire: *Attention* Python Process [" + std::to_string(current_pid)
+                                                + "] was kill because MEMORY usage " + std::to_string(mem_usage)
+                                                + "% exceed the limit " + std::to_string(max_mem_bound) +
+                                                "%; Process info: " + line;
+//                                        send_message(getSlackInfraChannel(), message);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                 }
             }
+
 
             auto rs = result.empty() ? "" : join(result, ",");
             return inject_common_data(action, "[" + rs + "]");
@@ -1056,6 +1111,8 @@ public:
             if (need_start("python", current_time))     send_message(compose_message("python"));
             if (need_start("xtext", current_time))      send_message(compose_message("xtext"));
             if (need_start("cpu", current_time))        send_message(compose_message("cpu"));
+            if (need_start("kill_cpu", current_time))   send_message(compose_message("kill_cpu"));
+            if (need_start("kill_mem", current_time))   send_message(compose_message("kill_mem"));
 
             std::this_thread::sleep_for(std::chrono::milliseconds(1 * 500));
             if (++cnt > 10000000) {
@@ -1078,6 +1135,7 @@ int main(int argc, char* argv[]) {
     auto params = "\"cpu:5,disk:120[/],df:120[/;/data],dailyreport[7-00],ps:30,net:20,memory:30,python:30,tcp:30,hostinfo,docker:120\"";
     auto apikey = "";
     auto securekey = "";
+    auto sysroot = "/";
     try {
         if (argc < 4) {
             usage_massage(argv[0], params);
@@ -1101,9 +1159,15 @@ int main(int argc, char* argv[]) {
             }
             if(std::string(argv[i]).find("--securekey=") == 0) {
                 securekey = argv[i] + strlen("--securekey=");
-                CRYPTO_KEY = std::string(securekey);
+                CRYPTO_KEY = std::string(argv[i] + strlen("--securekey="));
                 continue;
             }
+            if(std::string(argv[i]).find("--sysroot=") == 0) {
+                sysroot = argv[i] + strlen("--sysroot=");
+                SYSTEM_ROOT = std::string(sysroot);
+                continue;
+            }
+
             if (std::string(argv[i]) == "-d") {
                 need_daemonize = true;
                 continue;
