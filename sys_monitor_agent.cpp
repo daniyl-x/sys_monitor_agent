@@ -45,6 +45,7 @@ int DEBOUNCE_TIME_SEC = 10 * 60;
 
 std::string APP_KEY = "NEWTESTKEY";
 std::string CRYPTO_KEY = "";
+std::string SLACK_PATH = "";
 std::string SYSTEM_ROOT = "/";
 
 std::string get_app_key() {
@@ -1135,6 +1136,7 @@ int main(int argc, char* argv[]) {
     auto params = "\"cpu:5,disk:120[/],df:120[/;/data],dailyreport[7-00],ps:30,net:20,memory:30,python:30,tcp:30,hostinfo,docker:120,kill_mem:60[20]\"";
     auto apikey = "";
     auto securekey = "";
+    auto slack_path = "";
     auto sysroot = "/";
     try {
         if (argc < 4) {
@@ -1160,6 +1162,11 @@ int main(int argc, char* argv[]) {
             if(std::string(argv[i]).find("--securekey=") == 0) {
                 securekey = argv[i] + strlen("--securekey=");
                 CRYPTO_KEY = std::string(argv[i] + strlen("--securekey="));
+                continue;
+            }
+            if(std::string(argv[i]).find("--slackpath=") == 0) {
+                slack_path = argv[i] + strlen("--slackpath=");
+                SLACK_PATH = std::string(slack_path);
                 continue;
             }
             if(std::string(argv[i]).find("--sysroot=") == 0) {
@@ -1195,7 +1202,7 @@ int main(int argc, char* argv[]) {
                              boost::asio::ip::address::from_string(address),
                              (short unsigned)atoi(port),
                              params,
-                             "",    // will be added as an command line argument late
+                             SLACK_PATH,
                              self_print);
         ioc.run();
     }
